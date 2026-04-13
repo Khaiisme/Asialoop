@@ -20,7 +20,7 @@ const Modal = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [showDishes, setShowDishes] = useState(false); // To control the visibility of the filtered dishes
   const [showPaymentSelection, setShowPaymentSelection] = useState(false);
-  const [customPrice, setCustomPrice] = useState("");
+  const [paymentButtonRef, setPaymentButtonRef] = useState(null);
   const [showCustomDishModal, setShowCustomDishModal] = useState(false);
   const modalRef = useRef(null); // Reference for the modal
   const searchWrapperRef = useRef(null); // Reference for the search wrapper
@@ -227,12 +227,15 @@ const Modal = ({
     setShowPaymentSelection(false);
   };
 
-  const selectAllAndPay = () => {
+  const selectAllAndPay = (e) => {
     const allChecked = {};
     orderItems.forEach((_, i) => {
       allChecked[i] = true;
     });
     setCheckedItems(allChecked);
+    if (e && e.currentTarget) {
+      setPaymentButtonRef(e.currentTarget);
+    }
     setShowPaymentSelection(true);
   };
 
@@ -368,7 +371,11 @@ const Modal = ({
             )}
             {Object.values(checkedItems).some(value => value) && (
               <button
-                onClick={() => setShowPaymentSelection(true)}
+                ref={setPaymentButtonRef}
+                onClick={(e) => {
+                  setPaymentButtonRef(e.currentTarget);
+                  setShowPaymentSelection(true);
+                }}
                 className="bg-green-600 hover:bg-green-800 text-white p-2 rounded-md shadow flex items-center justify-center transition-colors"
                 title="Bezahlen"
               >
@@ -420,25 +427,31 @@ const Modal = ({
             </div>
           )}
 
-          {showPaymentSelection && (
-            <div className="absolute inset-0 bg-white/95 flex flex-col justify-center items-center z-50 rounded-lg">
-              <h3 className="text-3xl font-bold mb-8 text-gray-800">Zahlungsart wählen</h3>
-              <div className="flex gap-6">
+          {showPaymentSelection && paymentButtonRef && (
+            <div 
+              className="fixed bg-white border-2 border-gray-300 rounded-lg shadow-xl p-4 z-50 w-72"
+              style={{
+                top: `${paymentButtonRef.getBoundingClientRect().top}px`,
+                right: `${window.innerWidth - paymentButtonRef.getBoundingClientRect().right + 10}px`,
+              }}
+            >
+              <h3 className="text-lg font-bold mb-4 text-gray-800 text-center">Zahlungsart</h3>
+              <div className="flex flex-col gap-3">
                 <button
-                  className="bg-green-500 hover:bg-green-600 text-white font-bold px-8 py-4 rounded-xl text-2xl shadow-lg transition-transform hover:scale-105"
+                  className="bg-green-500 hover:bg-green-600 text-white font-bold px-4 py-3 rounded-lg text-lg shadow-lg transition-transform hover:scale-105"
                   onClick={() => createBillAndRemoveChecked(tableName, "Bar")}
                 >
-                  💵 Mit Bar
+                  💵 Bar
                 </button>
                 <button
-                  className="bg-blue-500 hover:bg-blue-600 text-white font-bold px-8 py-4 rounded-xl text-2xl shadow-lg transition-transform hover:scale-105"
+                  className="bg-blue-500 hover:bg-blue-600 text-white font-bold px-4 py-3 rounded-lg text-lg shadow-lg transition-transform hover:scale-105"
                   onClick={() => createBillAndRemoveChecked(tableName, "Karte")}
                 >
                   💳 Karte
                 </button>
               </div>
               <button
-                className="mt-8 text-gray-500 text-xl hover:text-gray-700 transition-colors underline"
+                className="mt-4 w-full text-gray-600 text-sm hover:text-gray-800 transition-colors font-semibold"
                 onClick={() => setShowPaymentSelection(false)}
               >
                 Abbrechen

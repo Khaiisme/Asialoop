@@ -389,10 +389,8 @@ const App = () => {
 
 
   // Read from localStorage and set the initial state for tables and orders
-  const storedTables = JSON.parse(localStorage.getItem("tables")) || [
-    ...Array.from({ length: 15 }, (_, i) => i + 1),         // 1 to 11
-    ...Array.from({ length: 8 }, (_, i) => i + 20)          // 15 to 19
-  ];
+  const storedTables = JSON.parse(localStorage.getItem("tables")) || 
+    Array.from({ length: 36 }, (_, i) => i + 1);         // 1 to 36
   let storedOrders = {};
   try {
     const raw = localStorage.getItem("orders");
@@ -515,7 +513,7 @@ const App = () => {
   useEffect(() => {
     const interval = setInterval(() => {
       fetchOrders();
-    }, 1500);
+    }, 2000);
     return () => clearInterval(interval);
   }, []);
 
