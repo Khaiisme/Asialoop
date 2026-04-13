@@ -435,8 +435,16 @@ const Modal = ({
                 right: `${window.innerWidth - paymentButtonRef.getBoundingClientRect().right + 10}px`,
               }}
             >
-              <h3 className="text-lg font-bold mb-4 text-gray-800 text-center">Zahlungsart</h3>
-              <div className="flex flex-col gap-3">
+              <button
+                onClick={() => setShowPaymentSelection(false)}
+                className="absolute top-2 right-2 text-xl font-bold text-gray-600 hover:text-gray-800"
+              >
+                X
+              </button>
+              <div className="text-center font-bold text-lg mb-4">
+                Total: {totalPrice.toFixed(2)}€
+              </div>
+              <div className="flex flex-row gap-3 justify-center">
                 <button
                   className="bg-green-500 hover:bg-green-600 text-white font-bold px-4 py-3 rounded-lg text-lg shadow-lg transition-transform hover:scale-105"
                   onClick={() => createBillAndRemoveChecked(tableName, "Bar")}
@@ -450,12 +458,6 @@ const Modal = ({
                   💳 Karte
                 </button>
               </div>
-              <button
-                className="mt-4 w-full text-gray-600 text-sm hover:text-gray-800 transition-colors font-semibold"
-                onClick={() => setShowPaymentSelection(false)}
-              >
-                Abbrechen
-              </button>
             </div>
           )}
 
