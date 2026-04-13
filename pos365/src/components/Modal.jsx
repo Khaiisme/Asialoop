@@ -431,7 +431,7 @@ const Modal = ({
             <div 
               className="fixed bg-white border-2 border-gray-300 rounded-lg shadow-xl p-4 z-50 w-72"
               style={{
-                top: `${paymentButtonRef.getBoundingClientRect().top}px`,
+                top: `${paymentButtonRef.getBoundingClientRect().top - 50}px`,
                 right: `${window.innerWidth - paymentButtonRef.getBoundingClientRect().right + 10}px`,
               }}
             >
