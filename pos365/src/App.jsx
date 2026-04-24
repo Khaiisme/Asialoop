@@ -8,8 +8,8 @@ import { FiRotateCcw } from 'react-icons/fi';
 import { FiRepeat } from "react-icons/fi";
 const dishes = [
   { name: "M1", price: 11.9 },
-  { name: "M2a.Mit Tofu", price: 10.9 },
-  { name: "M2b.Mit gebratem Hähnchen", price: 11.9 },
+  { name: "M2.Mit Tofu", price: 10.9 },
+  { name: "M2.Mit gebratem Hähnchen", price: 11.9 },
   { name: "M3", price: 9.5 },
   { name: "M4", price: 9.5 },
   { name: "M5", price: 8.5 },
@@ -143,21 +143,6 @@ const dishes = [
   { name: "45b.Thot Aubergine Hähnchen", price: 14.5 },
   { name: "45c.Thot Aubergine Rind", price: 14.9 },
   { name: "45d.Thot Aubergine Garnelen", price: 15.9 },
-  { name: "Diverse Speisen", price: 15 },
-  { name: "Diverse Speisen", price: 14 },
-  { name: "Diverse Speisen", price: 13 },
-  { name: "Diverse Speisen", price: 12 },
-  { name: "Diverse Speisen", price: 11 },
-  { name: "Diverse Speisen", price: 10 },
-  { name: "Diverse Speisen", price: 9 },
-  { name: "Diverse Speisen", price: 8 },
-  { name: "Diverse Speisen", price: 7 },
-  { name: "Diverse Speisen", price: 6 },
-  { name: "Diverse Speisen", price: 5 },
-  { name: "Diverse Speisen", price: 4 },
-  { name: "Diverse Speisen", price: 3 },
-  { name: "Diverse Speisen", price: 2 },
-  { name: "Diverse Speisen", price: 1 },
 
   { name: "60.Futo Big", price: 8.9 },
   { name: "61.Futo Big Roll", price: 8.2 },
@@ -366,7 +351,7 @@ const dishes = [
   { name: "~Rieslingschorle ", price: 6.5 },
   { name: "~Riesling ", price: 6.5 },
   { name: "~Riesling Halbtrocken", price: 5.5 },
-  { name: "~Sauvignon ", price: 6 },
+  { name: "~Sauvignon ", price: 5.5 },
   { name: "~Grauburgrunderschorle ", price: 7 },
   { name: "~Grauburgrunder ", price: 7 },
   { name: "~Rose trocken", price: 5.5 },
@@ -513,7 +498,7 @@ const App = () => {
   useEffect(() => {
     const interval = setInterval(() => {
       fetchOrders();
-    }, 2000);
+    }, 1600);
     return () => clearInterval(interval);
   }, []);
 

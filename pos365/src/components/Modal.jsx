@@ -22,6 +22,7 @@ const Modal = ({
   const [showPaymentSelection, setShowPaymentSelection] = useState(false);
   const [paymentButtonRef, setPaymentButtonRef] = useState(null);
   const [showCustomDishModal, setShowCustomDishModal] = useState(false);
+  const [customPrice, setCustomPrice] = useState("");
   const modalRef = useRef(null); // Reference for the modal
   const searchWrapperRef = useRef(null); // Reference for the search wrapper
   const [note, setNote] = useState("");

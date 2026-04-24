@@ -106,7 +106,7 @@ export default function BillsPage() {
                   onClick={() => toggleBillExpand(index)}
                   className="cursor-pointer p-4 hover:bg-gray-50 transition-colors flex justify-between items-center"
                 >
-                  <div className="flex items-center gap-3 flex-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 flex-1">
                     <span className="font-bold text-lg">Tisch {bill.table}</span>
                     {bill.method && (
                       <span
@@ -115,6 +115,14 @@ export default function BillsPage() {
                         }`}
                       >
                         {bill.method}
+                      </span>
+                    )}
+                    {bill.date && (
+                      <span className="text-sm text-gray-600">
+                        {new Date(bill.date).toLocaleTimeString("de-DE", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
                       </span>
                     )}
                   </div>
@@ -131,18 +139,6 @@ export default function BillsPage() {
                 {/* Expanded Details */}
                 {expandedBills[index] && (
                   <div className="border-t-2 border-gray-300 p-4 bg-gray-50">
-                    {/* Date */}
-                    <div className="mb-3 pb-3 border-b border-gray-300">
-                      <span className="text-sm text-gray-600">
-                        {new Date(bill.date).toLocaleString("de-DE", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          year: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </div>
 
                     {/* Items */}
                     <div className="space-y-2 mb-3">
