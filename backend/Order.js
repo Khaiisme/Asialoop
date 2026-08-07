@@ -1,11 +1,12 @@
 const mongoose = require('mongoose');
 
 const orderSchema = new mongoose.Schema({
-  table: String,          // match the 'table' key from frontend (string)
-  orders: [               // match the 'orders' key from frontend
+  table: String,
+  orders: [
     {
       name: String,
-      price: Number
+      price: Number,
+      orderIndex: Number
     }
   ]
 });

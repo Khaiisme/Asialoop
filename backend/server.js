@@ -28,11 +28,16 @@ app.post('/api/orders', async (req, res) => {
       return res.status(400).json({ error: 'Invalid format. Expecting {table, orders}' });
     }
 
+    const normalizedOrders = orders.map((item, index) => ({
+      ...item,
+      orderIndex: index,
+    }));
+
     console.log("Updating table:", table);
 
     const updated = await Order.findOneAndUpdate(
-      { table },       // match by table
-      { orders },      // update the orders for that table
+      { table },
+      { orders: normalizedOrders },
       { new: true, upsert: true }
     );
 

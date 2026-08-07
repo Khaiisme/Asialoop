@@ -15,17 +15,22 @@ const Modal = ({
   setTables,
   addOrderItem,
   removeOrderItem,
+  reorderOrderItems,
   dishes,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [showDishes, setShowDishes] = useState(false); // To control the visibility of the filtered dishes
   const [showPaymentSelection, setShowPaymentSelection] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+  const [dragReadyIndex, setDragReadyIndex] = useState(null);
   const [paymentButtonRef, setPaymentButtonRef] = useState(null);
   const [showCustomDishModal, setShowCustomDishModal] = useState(false);
   const [customPrice, setCustomPrice] = useState("");
   const modalRef = useRef(null); // Reference for the modal
   const searchWrapperRef = useRef(null); // Reference for the search wrapper
   const [note, setNote] = useState("");
+  const pressTimerRef = useRef(null);
   // Calculate the total
 
   async function fetchNoteForTable(tableName) {
@@ -127,6 +132,54 @@ const Modal = ({
     return () => clearTimeout(timeout);
   }, [note, tableName]);
 
+  useEffect(() => {
+    return () => {
+      if (pressTimerRef.current) {
+        clearTimeout(pressTimerRef.current);
+      }
+    };
+  }, []);
+
+  const clearLongPress = () => {
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+  };
+
+  const startLongPress = (index) => {
+    clearLongPress();
+    pressTimerRef.current = setTimeout(() => {
+      setDragReadyIndex(index);
+      setDraggedIndex(index);
+    }, 1000);
+  };
+
+  const handleDragStart = (index) => {
+    if (dragReadyIndex !== index) return;
+    setDraggedIndex(index);
+  };
+
+  const resetDragState = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+    setDragReadyIndex(null);
+    clearLongPress();
+  };
+
+  const handleDrop = (targetIndex) => {
+    if (
+      draggedIndex === null ||
+      draggedIndex === targetIndex ||
+      typeof reorderOrderItems !== "function"
+    ) {
+      resetDragState();
+      return;
+    }
+
+    reorderOrderItems(draggedIndex, targetIndex);
+    resetDragState();
+  };
 
   const createBillAndRemoveChecked = async (tableName, method) => {
     // Step 1: Gather checked items
@@ -324,7 +377,24 @@ const Modal = ({
             {orderItems.map((item, index) => (
               <div
                 key={index}
-                className="flex justify-between items-center px-2 py-1 border-b last:border-0 hover:bg-gray-100"
+                draggable={dragReadyIndex === index}
+                onPointerDown={() => startLongPress(index)}
+                onPointerUp={clearLongPress}
+                onPointerLeave={clearLongPress}
+                onPointerCancel={clearLongPress}
+                onDragStart={() => handleDragStart(index)}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (dragReadyIndex !== null) {
+                    setDragOverIndex(index);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleDrop(index);
+                }}
+                onDragEnd={resetDragState}
+                className={`flex justify-between items-center px-2 py-1 border-b last:border-0 hover:bg-gray-100 ${dragOverIndex === index ? "bg-blue-50" : ""} ${dragReadyIndex === index ? "ring-2 ring-blue-400" : ""}`}
               >
                 {/* Left: Checkbox + Item name */}
                 <div className="flex items-center space-x-2">

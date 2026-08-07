@@ -498,7 +498,7 @@ const App = () => {
   useEffect(() => {
     const interval = setInterval(() => {
       fetchOrders();
-    }, 1600);
+    }, 800);
     return () => clearInterval(interval);
   }, []);
 
@@ -531,132 +531,104 @@ const App = () => {
     setIsModalOpen(true);
   };
 
+  const syncTableOrdersToServer = async (tableName, orders) => {
+    if (!tableName) return;
+
+    const payload = {
+      table: tableName,
+      orders: orders.map((item, index) => ({
+        ...item,
+        orderIndex: index,
+      })),
+    };
+
+    const fetchWithTimeout = (url, options, timeout = 7000) =>
+      Promise.race([
+        fetch(url, options),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Timeout")), timeout)
+        ),
+      ]);
+
+    let attempts = 0;
+    const maxAttempts = 3;
+    let success = false;
+
+    while (!success && attempts < maxAttempts) {
+      attempts++;
+      try {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/api/orders`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+        const data = await res.json();
+        console.log("✅ Synced table", tableName, "to DB:", data);
+        success = true;
+      } catch (err) {
+        console.warn(`Attempt ${attempts} failed:`, err.message);
+        if (attempts < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 500));
+        } else {
+          console.error("❌ Failed after 3 attempts:", err);
+          alert(
+            `⚠️ Could not sync table ${tableName} with the server. Will retry later.`
+          );
+        }
+      }
+    }
+  };
+
   // Add order item (dish) to the list
   const addOrderItem = async (name, price) => {
     const newOrderItem = { name, price };
     const currentOrders = allOrders[currentTable] || [];
     const updatedOrderItems = [...currentOrders, newOrderItem];
 
-    // ✅ only update the chosen table in localStorage
     const updatedOrders = { ...allOrders, [currentTable]: updatedOrderItems };
     setAllOrders(updatedOrders);
     localStorage.setItem("orders", JSON.stringify(updatedOrders));
 
-    // ✅ send only this table’s data to server
-    const payload = {
-      table: currentTable,
-      orders: updatedOrderItems,
-    };
-
-    // 🕒 helper for timeout
-    const fetchWithTimeout = (url, options, timeout = 7000) =>
-      Promise.race([
-        fetch(url, options),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Timeout")), timeout)
-        ),
-      ]);
-
-    // 🔁 retry mechanism (3 attempts)
-    let attempts = 0;
-    const maxAttempts = 3;
-    let success = false;
-
-    while (!success && attempts < maxAttempts) {
-      attempts++;
-      try {
-        const res = await fetchWithTimeout(
-          `${API_BASE_URL}/api/orders`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          }
-        );
-
-        if (!res.ok) throw new Error(`Server responded with ${res.status}`);
-        const data = await res.json();
-        console.log("✅ Synced table", currentTable, "to DB:", data);
-        success = true;
-      } catch (err) {
-        console.warn(`Attempt ${attempts} failed:`, err.message);
-        if (attempts === maxAttempts) {
-          console.error("❌ Failed after 3 attempts");
-          alert(
-            `⚠️ Could not sync table ${currentTable} to server. Will retry automatically later.`
-          );
-        } else {
-          await new Promise((r) => setTimeout(r, 1500)); // wait before retry
-        }
-      }
-    }
+    await syncTableOrdersToServer(currentTable, updatedOrderItems);
   };
-
-
-
 
   // Remove order item from the list
   const removeOrderItem = async (index) => {
     const currentOrders = allOrders[currentTable] || [];
     const updatedOrderItems = currentOrders.filter((_, i) => i !== index);
 
-    // 💾 Update local cache immediately
     const updatedOrders = { ...allOrders, [currentTable]: updatedOrderItems };
     setAllOrders(updatedOrders);
     localStorage.setItem("orders", JSON.stringify(updatedOrders));
 
-    // ✅ Only send current table to server
-    const payload = {
-      table: currentTable,
-      orders: updatedOrderItems,
-    };
-
-    // 🕒 Helper: fetch with timeout
-    const fetchWithTimeout = (url, options, timeout = 7000) =>
-      Promise.race([
-        fetch(url, options),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Timeout")), timeout)
-        ),
-      ]);
-
-    // 🔁 Retry logic (3 attempts)
-    let attempts = 0;
-    const maxAttempts = 3;
-    let success = false;
-
-    while (!success && attempts < maxAttempts) {
-      attempts++;
-      try {
-        const res = await fetchWithTimeout(
-          `${API_BASE_URL}/api/orders`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          }
-        );
-
-        if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
-        const data = await res.json();
-        console.log("✅ Synced table", currentTable, "to DB:", data);
-        success = true;
-      } catch (err) {
-        console.warn(`Attempt ${attempts} failed:`, err.message);
-        if (attempts < maxAttempts) {
-          await new Promise((r) => setTimeout(r, 1500)); // wait 1.5s before retry
-        } else {
-          console.error("❌ Failed after 3 attempts:", err);
-          alert(
-            `⚠️ Could not sync table ${currentTable} with the server. Will retry later.`
-          );
-        }
-      }
-    }
+    await syncTableOrdersToServer(currentTable, updatedOrderItems);
   };
 
+  const reorderOrderItems = async (fromIndex, toIndex) => {
+    if (!currentTable) return;
 
+    const currentOrders = [...(allOrders[currentTable] || [])];
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= currentOrders.length ||
+      toIndex >= currentOrders.length
+    ) {
+      return;
+    }
+
+    const [movedItem] = currentOrders.splice(fromIndex, 1);
+    currentOrders.splice(toIndex, 0, movedItem);
+
+    const updatedOrders = { ...allOrders, [currentTable]: currentOrders };
+    setAllOrders(updatedOrders);
+    localStorage.setItem("orders", JSON.stringify(updatedOrders));
+
+    await syncTableOrdersToServer(currentTable, currentOrders);
+  };
 
   const tablesWithOrders = Object.keys(allOrders).filter(
     (table) => allOrders[table] && allOrders[table].length > 0
@@ -768,11 +740,14 @@ const App = () => {
         setOrderItems={(newItems) => {
           const updated = { ...allOrders, [currentTable]: newItems };
           setAllOrders(updated);
+          localStorage.setItem("orders", JSON.stringify(updated));
+          syncTableOrdersToServer(currentTable, newItems);
         }}
         tables={tables}
         setTables={setTables}
         addOrderItem={addOrderItem}
         removeOrderItem={removeOrderItem}
+        reorderOrderItems={reorderOrderItems}
         dishes={dishes}
       />
 
