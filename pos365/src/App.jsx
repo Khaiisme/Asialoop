@@ -884,7 +884,6 @@ const App = () => {
           className="flex items-center gap-2 px-3 py-2 bg-yellow-300 text-black rounded-lg hover:bg-yellow-400 shadow"
         >
           <FiSettings className="w-5 h-5" />
-          Doanh thu
         </button>
       </div>
 
@@ -926,8 +925,7 @@ const App = () => {
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="text-2xl font-bold">Báo cáo doanh thu hôm nay</h2>
-                <p className="text-sm text-gray-500">Dữ liệu được lấy từ bills và làm mới mỗi ngày.</p>
+                
               </div>
               <button
                 onClick={closeRevenueModal}
@@ -939,7 +937,7 @@ const App = () => {
 
             {!revenueAuthorized ? (
               <div className="space-y-4">
-                <p className="text-base text-gray-700">Nhập mật khẩu để xem doanh thu:</p>
+                <p className="text-base text-gray-700">Nhập mật khẩu:</p>
                 <input
                   type="password"
                   value={revenuePassword}
