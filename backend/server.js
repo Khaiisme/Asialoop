@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const Order = require('./Order');
+const DeletedItem = require('./DeletedItem');
 const app = express();
 const Note = require('./Note');
 const Bill = require('./Bill');
@@ -111,6 +112,35 @@ app.post('/api/notes', async (req, res) => {
   }
 });
 
+app.post('/api/deleted-items', async (req, res) => {
+  try {
+    const { table, name, price, deletedAt } = req.body;
+
+    if (!table || !name || typeof price !== 'number') {
+      return res.status(400).json({ error: 'Invalid deleted item payload.' });
+    }
+
+    const newDeletedItem = new DeletedItem({ table, name, price, deletedAt });
+    const savedDeletedItem = await newDeletedItem.save();
+    res.status(201).json(savedDeletedItem);
+  } catch (error) {
+    console.error('Error saving deleted item:', error);
+    res.status(500).json({ error: 'Failed to save deleted item.' });
+  }
+});
+
+app.get('/api/deleted-items', async (req, res) => {
+  try {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const deletedItems = await DeletedItem.find({ deletedAt: { $gte: startOfToday } }).sort({ deletedAt: -1 });
+    res.status(200).json(deletedItems);
+  } catch (error) {
+    console.error('Error fetching deleted items:', error);
+    res.status(500).json({ error: 'Failed to fetch deleted items.' });
+  }
+});
 
 app.get("/api/notes", async (req, res) => {
   try {

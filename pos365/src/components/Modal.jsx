@@ -187,56 +187,21 @@ const Modal = ({
       .filter((_, index) => checkedItems[index])
       .map(item => ({
         name: item.name,
-        price: item.price
+        price: Number(item.price),
       }));
 
     if (checkedList.length === 0) return; // Nothing selected
 
     // Step 2: Calculate total price
-    const billTotal = checkedList.reduce((sum, item) => sum + Number(item.price), 0);
+    const billTotal = checkedList.reduce((sum, item) => sum + item.price, 0);
 
     // Step 3: Create bill object
     const newBill = {
       table: tableName,
       items: checkedList,
       total: billTotal,
-      method: method,
+      method,
       date: new Date().toISOString(),
-    };
-
-    // Step 4: Save bill to localStorage (append to history)
-    const existingBills = JSON.parse(localStorage.getItem("bills")) || [];
-    existingBills.push(newBill);
-    localStorage.setItem("bills", JSON.stringify(existingBills));
-
-    console.log("Bill Saved locally:", newBill);
-
-    // Sync new bill to server
-    try {
-      await fetch(`${API_BASE_URL}/api/bills`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newBill),
-      });
-      console.log("Bill synced to server successfully");
-    } catch (err) {
-      console.warn("Failed to sync bill to server:", err);
-    }
-
-    // Step 5: Remove checked items from orderItems
-    const updatedOrderItems = orderItems.filter((_, index) => !checkedItems[index]);
-    setOrderItems(updatedOrderItems);
-
-    const saved = JSON.parse(localStorage.getItem("orders")) || {};
-    const updatedAllOrders = {
-      ...saved,
-      [tableName]: updatedOrderItems,
-    };
-    localStorage.setItem("orders", JSON.stringify(updatedAllOrders));
-    // 4️⃣ Now sync updated orders to server
-    const payload = {
-      table: tableName,
-      orders: updatedOrderItems,
     };
 
     // Helper: fetch with timeout
@@ -248,35 +213,74 @@ const Modal = ({
         ),
       ]);
 
-    // Retry mechanism
-    let attempts = 0;
-    const maxAttempts = 3;
-    let success = false;
-
-    while (!success && attempts < maxAttempts) {
-      attempts++;
-
-      try {
-        const res = await fetchWithTimeout(
-          `${API_BASE_URL}/api/orders`,
-          {
+    const postJsonWithRetry = async (url, payload, maxAttempts = 3) => {
+      let lastError;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const response = await fetchWithTimeout(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => ({}));
+            throw new Error(errorBody.error || `Server error: ${response.status}`);
           }
-        );
 
-        if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
-        const data = await res.json();
-        console.log(`✅ Synced table ${tableName} to DB:`, data);
-        success = true;
-
-      } catch (err) {
-        console.warn(`⚠️ Attempt ${attempts} failed:`, err.message);
+          return response.json();
+        } catch (error) {
+          lastError = error;
+          console.warn(`⚠️ Attempt ${attempt} to POST ${url} failed:`, error.message);
+          if (attempt === maxAttempts) break;
+        }
       }
+      throw lastError;
+    };
+
+    let savedBill;
+    try {
+      savedBill = await postJsonWithRetry(`${API_BASE_URL}/api/bills`, newBill);
+      console.log("Bill synced to server successfully", savedBill);
+    } catch (err) {
+      console.error("Failed to save bill to server:", err);
+      alert('Không thể lưu bill vào database. Vui lòng refresh lại trang.');
+      window.location.reload();
+      return;
     }
-    // Step 6: Clear checked state
+
+    // Save bill locally only after successful DB persistence
+    const existingBills = JSON.parse(localStorage.getItem("bills")) || [];
+    existingBills.push(savedBill);
+    localStorage.setItem("bills", JSON.stringify(existingBills));
+
+    // Step 4: Remove checked items from orderItems
+    const updatedOrderItems = orderItems.filter((_, index) => !checkedItems[index]);
+    setOrderItems(updatedOrderItems);
+
+    const saved = JSON.parse(localStorage.getItem("orders")) || {};
+    const updatedAllOrders = {
+      ...saved,
+      [tableName]: updatedOrderItems,
+    };
+    localStorage.setItem("orders", JSON.stringify(updatedAllOrders));
+
+    const payload = {
+      table: tableName,
+      orders: updatedOrderItems,
+    };
+
+    try {
+      await postJsonWithRetry(`${API_BASE_URL}/api/orders`, payload);
+      console.log(`✅ Synced table ${tableName} orders to DB`);
+    } catch (err) {
+      console.error("Failed to sync updated orders to server:", err);
+      alert('Bill đã lưu, nhưng cập nhật đơn hàng thất bại. Vui lòng refresh lại trang.');
+      window.location.reload();
+      return;
+    }
+
+    // Step 5: Clear checked state and close payment UI
     setCheckedItems({});
     setShowPaymentSelection(false);
   };
@@ -298,7 +302,7 @@ const Modal = ({
       <div className="text-xl fixed inset-0 bg-gray-400 bg-opacity-50 flex justify-center items-center z-50">
         <div
           ref={modalRef}
-          className="bg-white p-6 rounded-lg w-full h-full sm:max-w-md sm:max-h-screen overflow-y-auto relative"
+          className="bg-white p-6 rounded-lg w-full h-full sm:max-w-md sm:max-h-screen overflow-y-auto relative select-none"
         >
           {/* Close button (X) */}
           <button
@@ -328,7 +332,7 @@ const Modal = ({
                 placeholder="Search for a dish..."
                 value={searchQuery}
                 onChange={handleSearchChange}
-                className="w-full p-2 border border-gray-300 rounded"
+                className="w-full p-2 border border-gray-300 rounded select-text"
               />
 
               {/* Display filtered dishes only if showDishes is true */}
@@ -367,7 +371,7 @@ const Modal = ({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={1}
-              className="w-full flex-1 p-2 border border-gray-300 rounded-md focus:outline-none focus:border-blue-500 resize-none overflow-hidden"
+              className="w-full flex-1 p-2 border border-gray-300 rounded-md focus:outline-none focus:border-blue-500 resize-none overflow-hidden select-text"
               placeholder="Write your note here..."
             />
           </div>
@@ -467,7 +471,7 @@ const Modal = ({
                 placeholder="Preis (€)"
                 value={customPrice}
                 onChange={(e) => setCustomPrice(e.target.value)}
-                className="w-full max-w-sm p-4 border border-gray-300 rounded-lg text-2xl text-center mb-6 focus:outline-none focus:border-blue-500"
+                className="w-full max-w-sm p-4 border border-gray-300 rounded-lg text-2xl text-center mb-6 focus:outline-none focus:border-blue-500 select-text"
                 step="0.01"
                 autoFocus
               />

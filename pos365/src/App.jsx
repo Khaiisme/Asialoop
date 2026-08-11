@@ -3,7 +3,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || "https://asianloopserver.on
 import Table from "./components/Table";
 import Modal from "./components/Modal";
 import BillsPage from "./components/Bills"
-import { FiRotateCcw } from 'react-icons/fi';
+import { FiRotateCcw, FiSettings } from 'react-icons/fi';
 // Sample dish data (name and price)
 import { FiRepeat } from "react-icons/fi";
 const dishes = [
@@ -395,8 +395,41 @@ const App = () => {
   const [firstTable, setFirstTable] = useState("");
   const [secondTable, setSecondTable] = useState("");
   const [showBills, setShowBills] = useState(false);
+  const [showRevenueModal, setShowRevenueModal] = useState(false);
+  const [revenuePassword, setRevenuePassword] = useState("");
+  const [revenueAuthorized, setRevenueAuthorized] = useState(false);
+  const [todayBills, setTodayBills] = useState([]);
+  const [revenueLoading, setRevenueLoading] = useState(false);
+  const [revenueError, setRevenueError] = useState("");
+  const [deletedItems, setDeletedItems] = useState([]);
 
+  const getTodayStorageKey = (baseKey) => {
+    const today = new Date();
+    const dateKey = today.toISOString().slice(0, 10);
+    return `${baseKey}:${dateKey}`;
+  };
 
+  useEffect(() => {
+    const loadDeletedItemsFromServer = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/deleted-items`);
+        if (!res.ok) {
+          throw new Error(`Server responded with ${res.status}`);
+        }
+        const data = await res.json();
+        if (!Array.isArray(data)) {
+          throw new Error("Invalid deleted items response");
+        }
+        setDeletedItems(data);
+      } catch (err) {
+        console.error("Failed to load deleted items from server:", err);
+        const savedDeleted = JSON.parse(localStorage.getItem(getTodayStorageKey("deletedItems"))) || [];
+        setDeletedItems(savedDeleted);
+      }
+    };
+
+    loadDeletedItemsFromServer();
+  }, []);
 
   useEffect(() => {
     const INACTIVITY_LIMIT = 40 * 60 * 1000; // 40 minutes
@@ -594,10 +627,37 @@ const App = () => {
     await syncTableOrdersToServer(currentTable, updatedOrderItems);
   };
 
-  // Remove order item from the list
+  // Remove order item from the list and log deleted items for today
   const removeOrderItem = async (index) => {
     const currentOrders = allOrders[currentTable] || [];
+    const removedItem = currentOrders[index];
     const updatedOrderItems = currentOrders.filter((_, i) => i !== index);
+
+    if (removedItem) {
+      const deletedRecord = {
+        table: currentTable,
+        name: removedItem.name,
+        price: Number(removedItem.price),
+        deletedAt: new Date().toISOString(),
+      };
+
+      const nextDeletedItems = [
+        ...deletedItems,
+        deletedRecord,
+      ];
+      setDeletedItems(nextDeletedItems);
+      localStorage.setItem(getTodayStorageKey("deletedItems"), JSON.stringify(nextDeletedItems));
+
+      try {
+        await fetch(`${API_BASE_URL}/api/deleted-items`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(deletedRecord),
+        });
+      } catch (error) {
+        console.error("Failed to save deleted item to DB:", error);
+      }
+    }
 
     const updatedOrders = { ...allOrders, [currentTable]: updatedOrderItems };
     setAllOrders(updatedOrders);
@@ -641,6 +701,58 @@ const App = () => {
 
   };
 
+  const fetchTodayBills = async () => {
+    setRevenueLoading(true);
+    setRevenueError("");
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/bills`);
+      if (!res.ok) {
+        throw new Error(`Server responded with ${res.status}`);
+      }
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        throw new Error("Invalid bills response");
+      }
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todays = data.filter((bill) => {
+        const billDate = new Date(bill.date);
+        return billDate >= todayStart;
+      });
+      todays.sort((a, b) => new Date(b.date) - new Date(a.date));
+      setTodayBills(todays);
+    } catch (err) {
+      console.error("Failed to load bills for revenue:", err);
+      setRevenueError("Không thể tải dữ liệu doanh thu. Vui lòng thử lại sau.");
+    } finally {
+      setRevenueLoading(false);
+    }
+  };
+
+  const openRevenueModal = () => {
+    setShowRevenueModal(true);
+    setRevenuePassword("");
+    setRevenueAuthorized(false);
+    setRevenueError("");
+    setTodayBills([]);
+  };
+
+  const closeRevenueModal = () => {
+    setShowRevenueModal(false);
+    setRevenuePassword("");
+    setRevenueAuthorized(false);
+    setRevenueError("");
+  };
+
+  const handleRevenuePasswordSubmit = async () => {
+    if (revenuePassword.trim() === "asialoop12345") {
+      setRevenueAuthorized(true);
+      await fetchTodayBills();
+    } else {
+      setRevenueError("Mật khẩu không đúng. Vui lòng thử lại.");
+    }
+  };
 
   const switchTables = async () => {
     if (!firstTable || !secondTable) return;
@@ -766,6 +878,14 @@ const App = () => {
         >
           Lịch sử bàn
         </button>
+
+        <button
+          onClick={openRevenueModal}
+          className="flex items-center gap-2 px-3 py-2 bg-yellow-300 text-black rounded-lg hover:bg-yellow-400 shadow"
+        >
+          <FiSettings className="w-5 h-5" />
+          Doanh thu
+        </button>
       </div>
 
       {showBills && (
@@ -798,6 +918,120 @@ const App = () => {
             ✕
           </button>
 
+        </div>
+      )}
+
+      {showRevenueModal && (
+        <div className="fixed inset-0 bg-black/40 flex justify-center items-center z-50 px-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-2xl font-bold">Báo cáo doanh thu hôm nay</h2>
+                <p className="text-sm text-gray-500">Dữ liệu được lấy từ bills và làm mới mỗi ngày.</p>
+              </div>
+              <button
+                onClick={closeRevenueModal}
+                className="text-gray-600 hover:text-gray-900 text-2xl"
+              >
+                ✕
+              </button>
+            </div>
+
+            {!revenueAuthorized ? (
+              <div className="space-y-4">
+                <p className="text-base text-gray-700">Nhập mật khẩu để xem doanh thu:</p>
+                <input
+                  type="password"
+                  value={revenuePassword}
+                  onChange={(e) => setRevenuePassword(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg p-3"
+                  placeholder="Mật khẩu"
+                />
+                {revenueError && (
+                  <p className="text-red-600">{revenueError}</p>
+                )}
+                <button
+                  onClick={handleRevenuePasswordSubmit}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-3 font-semibold"
+                >
+                  Xác nhận
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {revenueLoading ? (
+                  <div className="text-center text-gray-600">Đang tải dữ liệu...</div>
+                ) : (
+                  <>
+                    {revenueError && (
+                      <div className="text-red-600">{revenueError}</div>
+                    )}
+
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                      <div className="rounded-xl border border-gray-200 p-4 bg-gray-50">
+                        <p className="text-sm text-gray-500">Tổng doanh thu</p>
+                        <p className="text-2xl font-bold text-green-700">
+                          {todayBills.reduce((sum, bill) => sum + Number(bill.total), 0).toFixed(2)}€
+                        </p>
+                        <p className="text-sm text-gray-600">Tổng {todayBills.length} hóa đơn</p>
+                      </div>
+                      <div className="rounded-xl border border-gray-200 p-4 bg-white">
+                        <p className="text-sm text-gray-500">Bar</p>
+                        <p className="text-2xl font-bold text-green-700">
+                          {todayBills
+                            .filter((bill) => bill.method === "Bar")
+                            .reduce((sum, bill) => sum + Number(bill.total), 0)
+                            .toFixed(2)}€
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          {todayBills.filter((bill) => bill.method === "Bar").length} hóa đơn
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-gray-200 p-4 bg-white">
+                        <p className="text-sm text-gray-500">Karte</p>
+                        <p className="text-2xl font-bold text-green-700">
+                          {todayBills
+                            .filter((bill) => bill.method === "Karte")
+                            .reduce((sum, bill) => sum + Number(bill.total), 0)
+                            .toFixed(2)}€
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          {todayBills.filter((bill) => bill.method === "Karte").length} hóa đơn
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 rounded-xl border border-gray-200 p-4 bg-gray-50">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <p className="text-lg font-semibold">Đồ ăn/đồ uống đã xóa hôm nay</p>
+                          <p className="text-sm text-gray-500">Các mục bị xóa từ đơn hàng trong ngày.</p>
+                        </div>
+                      </div>
+                      {deletedItems.length === 0 ? (
+                        <p className="text-gray-600">Không có món bị xóa hôm nay.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {deletedItems.map((item, index) => (
+                            <div key={index} className="rounded-lg bg-white p-3 border border-gray-200">
+                              <div className="flex justify-between gap-3">
+                                <span className="font-semibold">{item.name}</span>
+                                <span className="text-green-700">{Number(item.price).toFixed(2)}€</span>
+                              </div>
+                              <div className="flex flex-wrap gap-2 text-xs text-gray-500 mt-2">
+                                <span>Bàn {item.table}</span>
+                                <span>{new Date(item.deletedAt).toLocaleTimeString("de-DE", {hour: "2-digit", minute: "2-digit"})}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
