@@ -14,7 +14,7 @@ const dishes = [
   { name: "M4", price: 9.5 },
   { name: "M5", price: 8.5 },
   { name: "M6", price: 10.5 },
-  { name: "M7", price: 10.9 },
+  { name: "M7", price: 11.9 },
   { name: "M8a.Mit Tofu", price: 10.5 },
   { name: "M8b.Mit Hänchen", price: 11.9 },
   { name: "M9", price: 11.9 },
