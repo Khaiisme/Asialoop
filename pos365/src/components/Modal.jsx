@@ -6,53 +6,27 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || "https://asianloopserver.on
 
 
 const Modal = ({
-  fetchOrders,
   isOpen,
   onClose,
   tableName,
   orderItems,
   setOrderItems,
-  setTables,
   addOrderItem,
   removeOrderItem,
-  reorderOrderItems,
   dishes,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [showDishes, setShowDishes] = useState(false); // To control the visibility of the filtered dishes
   const [showPaymentSelection, setShowPaymentSelection] = useState(false);
-  const [draggedIndex, setDraggedIndex] = useState(null);
-  const [dragOverIndex, setDragOverIndex] = useState(null);
-  const [dragReadyIndex, setDragReadyIndex] = useState(null);
+  const [editingNoteIndex, setEditingNoteIndex] = useState(null);
+  const [itemNote, setItemNote] = useState("");
   const [paymentButtonRef, setPaymentButtonRef] = useState(null);
   const [showCustomDishModal, setShowCustomDishModal] = useState(false);
   const [customPrice, setCustomPrice] = useState("");
   const modalRef = useRef(null); // Reference for the modal
   const searchWrapperRef = useRef(null); // Reference for the search wrapper
-  const [note, setNote] = useState("");
   const pressTimerRef = useRef(null);
   // Calculate the total
-
-  async function fetchNoteForTable(tableName) {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/notes/${tableName}`);
-      const data = await res.json();
-      return data.note || "";
-    } catch (err) {
-      console.error("Error fetching note:", err);
-      return "";
-    }
-  }
-  useEffect(() => {
-    if (!isOpen || !tableName) return;
-
-    async function loadNote() {
-      const savedNote = await fetchNoteForTable(tableName);
-      setNote(savedNote);
-    }
-
-    loadNote();
-  }, [isOpen, tableName]);
 
 
   const calculateTotal = () => {
@@ -98,40 +72,6 @@ const Modal = ({
   };
 
 
-
-  const textareaRef = useRef(null);
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    requestAnimationFrame(() => {
-      textarea.style.height = 'auto'; // Reset
-      textarea.style.height = `${textarea.scrollHeight}px`; // Apply correct size
-    });
-  }, [note, isOpen]);
-
-  async function autoUpdateNote(tableName, note) {
-    try {
-      await fetch(`${API_BASE_URL}/api/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableName, note }),
-      });
-    } catch (error) {
-      console.error("Auto update note error:", error);
-    }
-  }
-
-  useEffect(() => {
-    if (!tableName) return;
-
-    const timeout = setTimeout(() => {
-      autoUpdateNote(tableName, note);
-    }, 500);
-
-    return () => clearTimeout(timeout);
-  }, [note, tableName]);
-
   useEffect(() => {
     return () => {
       if (pressTimerRef.current) {
@@ -150,35 +90,25 @@ const Modal = ({
   const startLongPress = (index) => {
     clearLongPress();
     pressTimerRef.current = setTimeout(() => {
-      setDragReadyIndex(index);
-      setDraggedIndex(index);
+      setEditingNoteIndex(index);
+      setItemNote(orderItems[index]?.note || "");
     }, 1000);
   };
 
-  const handleDragStart = (index) => {
-    if (dragReadyIndex !== index) return;
-    setDraggedIndex(index);
-  };
-
-  const resetDragState = () => {
-    setDraggedIndex(null);
-    setDragOverIndex(null);
-    setDragReadyIndex(null);
+  const closeItemNoteEditor = () => {
+    setEditingNoteIndex(null);
+    setItemNote("");
     clearLongPress();
   };
 
-  const handleDrop = (targetIndex) => {
-    if (
-      draggedIndex === null ||
-      draggedIndex === targetIndex ||
-      typeof reorderOrderItems !== "function"
-    ) {
-      resetDragState();
-      return;
-    }
+  const saveItemNote = () => {
+    if (editingNoteIndex === null) return;
 
-    reorderOrderItems(draggedIndex, targetIndex);
-    resetDragState();
+    const updatedOrderItems = orderItems.map((item, index) => (
+      index === editingNoteIndex ? { ...item, note: itemNote } : item
+    ));
+    setOrderItems(updatedOrderItems);
+    closeItemNoteEditor();
   };
 
   const createBillAndRemoveChecked = async (tableName, method) => {
@@ -364,42 +294,18 @@ const Modal = ({
             </div>
           </div>
 
-          {/* Note Box */}
-          <div>
-            <textarea
-              ref={textareaRef}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={1}
-              className="w-full flex-1 p-2 border border-gray-300 rounded-md focus:outline-none focus:border-blue-500 resize-none overflow-hidden select-text"
-              placeholder="Write your note here..."
-            />
-          </div>
-
           {/* Order Items */}
           <div className="mt-2 p-1 border border-gray-300 rounded-lg shadow-lg bg-white">
             {orderItems.map((item, index) => (
-              <div
-                key={index}
-                draggable={dragReadyIndex === index}
-                onPointerDown={() => startLongPress(index)}
-                onPointerUp={clearLongPress}
-                onPointerLeave={clearLongPress}
-                onPointerCancel={clearLongPress}
-                onDragStart={() => handleDragStart(index)}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  if (dragReadyIndex !== null) {
-                    setDragOverIndex(index);
-                  }
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  handleDrop(index);
-                }}
-                onDragEnd={resetDragState}
-                className={`flex justify-between items-center px-2 py-1 border-b last:border-0 hover:bg-gray-100 ${dragOverIndex === index ? "bg-blue-50" : ""} ${dragReadyIndex === index ? "ring-2 ring-blue-400" : ""}`}
-              >
+              <React.Fragment key={index}>
+                <div
+                  onPointerDown={() => startLongPress(index)}
+                  onPointerUp={clearLongPress}
+                  onPointerLeave={clearLongPress}
+                  onPointerCancel={clearLongPress}
+                  onContextMenu={(e) => e.preventDefault()}
+                  className="flex justify-between items-center px-2 py-1 border-b last:border-0 hover:bg-gray-100"
+                >
                 {/* Left: Checkbox + Item name */}
                 <div className="flex items-center space-x-2">
                   <input
@@ -408,7 +314,12 @@ const Modal = ({
                     onChange={() => toggleChecked(index)}
                     className="w-4 h-4"
                   />
-                  <span className="font-semibold text-xl">{item.name}</span>
+                  <div>
+                    <span className="font-semibold text-xl">{item.name}</span>
+                    {item.note && (
+                      <p className="text-sm text-gray-600 whitespace-pre-wrap">{item.note}</p>
+                    )}
+                  </div>
                 </div>
 
                 {/* Right: Price + Remove button */}
@@ -431,7 +342,37 @@ const Modal = ({
                     ✕
                   </span>
                 </div>
-              </div>
+                </div>
+                {editingNoteIndex === index && (
+                  <div className="px-2 py-2 bg-blue-50 border-b last:border-0">
+                  <textarea
+                    value={itemNote}
+                    onChange={(e) => setItemNote(e.target.value)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    rows={2}
+                    autoFocus
+                    className="w-full p-2 border border-blue-300 rounded-md resize-y select-text focus:outline-none focus:border-blue-500"
+                    placeholder="Ghi chú cho món ăn..."
+                  />
+                  <div className="flex justify-end gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={closeItemNoteEditor}
+                      className="px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveItemNote}
+                      className="px-3 py-1 text-sm text-white bg-blue-600 rounded hover:bg-blue-700"
+                    >
+                      Lưu ghi chú
+                    </button>
+                  </div>
+                  </div>
+                )}
+              </React.Fragment>
             ))}
 
 

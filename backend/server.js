@@ -4,7 +4,6 @@ const cors = require('cors');
 const Order = require('./Order');
 const DeletedItem = require('./DeletedItem');
 const app = express();
-const Note = require('./Note');
 const Bill = require('./Bill');
 
 // Middleware to handle CORS and JSON parsing
@@ -29,9 +28,10 @@ app.post('/api/orders', async (req, res) => {
       return res.status(400).json({ error: 'Invalid format. Expecting {table, orders}' });
     }
 
-    const normalizedOrders = orders.map((item, index) => ({
-      ...item,
-      orderIndex: index,
+    const normalizedOrders = orders.map((item) => ({
+      name: item.name,
+      price: item.price,
+      note: item.note || "",
     }));
 
     console.log("Updating table:", table);
@@ -92,26 +92,6 @@ app.get('/api/bills', async (req, res) => {
   }
 });
 
-app.post('/api/notes', async (req, res) => {
-  try {
-    const { tableName, note } = req.body;
-
-    const savedNote = await Note.findOneAndUpdate(
-      { tableName },
-      { note },
-      { new: true, upsert: true }  // create if doesn't exist
-    );
-
-    res.status(201).json({
-      message: 'Note saved/updated successfully.',
-      note: savedNote
-    });
-  } catch (error) {
-    console.error("Error saving note:", error);
-    res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
 app.post('/api/deleted-items', async (req, res) => {
   try {
     const { table, name, price, deletedAt } = req.body;
@@ -141,31 +121,6 @@ app.get('/api/deleted-items', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch deleted items.' });
   }
 });
-
-app.get("/api/notes", async (req, res) => {
-  try {
-    const notes = await Note.find();
-    res.status(200).json(notes);
-  } catch (error) {
-    console.error("Error fetching notes:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-app.get("/api/notes/:tableName", async (req, res) => {
-  try {
-    const { tableName } = req.params;
-
-    const note = await Note.findOne({ tableName });
-
-    res.status(200).json(note || { tableName, note: "" });
-  } catch (error) {
-    console.error("Error fetching note:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-
 
 // Start the server
 const PORT = process.env.PORT || 3000;

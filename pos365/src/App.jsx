@@ -569,9 +569,8 @@ const App = () => {
 
     const payload = {
       table: tableName,
-      orders: orders.map((item, index) => ({
+      orders: orders.map((item) => ({
         ...item,
-        orderIndex: index,
       })),
     };
 
@@ -664,30 +663,6 @@ const App = () => {
     localStorage.setItem("orders", JSON.stringify(updatedOrders));
 
     await syncTableOrdersToServer(currentTable, updatedOrderItems);
-  };
-
-  const reorderOrderItems = async (fromIndex, toIndex) => {
-    if (!currentTable) return;
-
-    const currentOrders = [...(allOrders[currentTable] || [])];
-    if (
-      fromIndex === toIndex ||
-      fromIndex < 0 ||
-      toIndex < 0 ||
-      fromIndex >= currentOrders.length ||
-      toIndex >= currentOrders.length
-    ) {
-      return;
-    }
-
-    const [movedItem] = currentOrders.splice(fromIndex, 1);
-    currentOrders.splice(toIndex, 0, movedItem);
-
-    const updatedOrders = { ...allOrders, [currentTable]: currentOrders };
-    setAllOrders(updatedOrders);
-    localStorage.setItem("orders", JSON.stringify(updatedOrders));
-
-    await syncTableOrdersToServer(currentTable, currentOrders);
   };
 
   const tablesWithOrders = Object.keys(allOrders).filter(
@@ -844,7 +819,6 @@ const App = () => {
 
       {/* Modal */}
       <Modal
-        fetchOrders={fetchOrders}
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         tableName={currentTable}
@@ -855,11 +829,8 @@ const App = () => {
           localStorage.setItem("orders", JSON.stringify(updated));
           syncTableOrdersToServer(currentTable, newItems);
         }}
-        tables={tables}
-        setTables={setTables}
         addOrderItem={addOrderItem}
         removeOrderItem={removeOrderItem}
-        reorderOrderItems={reorderOrderItems}
         dishes={dishes}
       />
 
