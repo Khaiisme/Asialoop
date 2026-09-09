@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import React from "react";
 import { FiDollarSign } from "react-icons/fi";
 import { FiPlus } from "react-icons/fi";
@@ -25,7 +25,6 @@ const Modal = ({
   const [customPrice, setCustomPrice] = useState("");
   const modalRef = useRef(null); // Reference for the modal
   const searchWrapperRef = useRef(null); // Reference for the search wrapper
-  const pressTimerRef = useRef(null);
   // Calculate the total
 
 
@@ -72,33 +71,14 @@ const Modal = ({
   };
 
 
-  useEffect(() => {
-    return () => {
-      if (pressTimerRef.current) {
-        clearTimeout(pressTimerRef.current);
-      }
-    };
-  }, []);
-
-  const clearLongPress = () => {
-    if (pressTimerRef.current) {
-      clearTimeout(pressTimerRef.current);
-      pressTimerRef.current = null;
-    }
-  };
-
-  const startLongPress = (index) => {
-    clearLongPress();
-    pressTimerRef.current = setTimeout(() => {
-      setEditingNoteIndex(index);
-      setItemNote(orderItems[index]?.note || "");
-    }, 1000);
+  const openItemNoteEditor = (index) => {
+    setEditingNoteIndex(index);
+    setItemNote(orderItems[index]?.note || "");
   };
 
   const closeItemNoteEditor = () => {
     setEditingNoteIndex(null);
     setItemNote("");
-    clearLongPress();
   };
 
   const saveItemNote = () => {
@@ -299,11 +279,7 @@ const Modal = ({
             {orderItems.map((item, index) => (
               <React.Fragment key={index}>
                 <div
-                  onPointerDown={() => startLongPress(index)}
-                  onPointerUp={clearLongPress}
-                  onPointerLeave={clearLongPress}
-                  onPointerCancel={clearLongPress}
-                  onContextMenu={(e) => e.preventDefault()}
+                  onDoubleClick={() => openItemNoteEditor(index)}
                   className="flex justify-between items-center px-2 py-1 border-b last:border-0 hover:bg-gray-100"
                 >
                 {/* Left: Checkbox + Item name */}
@@ -336,6 +312,7 @@ const Modal = ({
 
                       removeOrderItem(index);
                     }}
+                    onDoubleClick={(e) => e.stopPropagation()}
                     className="text-gray-700 text-xl p-0 leading-none cursor-pointer"
                     style={{ background: 'none', border: 'none' }}
                   >
