@@ -1,9 +1,112 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import React from "react";
-import { FiDollarSign } from "react-icons/fi";
-import { FiPlus } from "react-icons/fi";
+import { FiDollarSign, FiEye, FiEyeOff, FiPlus, FiSearch, FiTrash2, FiX } from "react-icons/fi";
 const API_BASE_URL = import.meta.env.VITE_API_URL || "https://asianloopserver.onrender.com";
 
+const drinkPattern = /tee|kaffee|espresso|cappuccino|wasser|cola|saft|bier|wein|sake|limonade|spritz|mojito|cocktail|drink|fanta|sprite|schorle|prosecco|smoothie|tonic/;
+const ignoredSimilarityTokens = new Set(["mit", "und", "oder", "fur", "zum", "zur"]);
+
+const getItemTokens = (name) => {
+  const normalizedName = String(name)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/^[~°\s]*\d+[a-z]?[.)\s-]*/, "")
+    .replace(/^[~°\s]+/, "");
+
+  return new Set(
+    (normalizedName.match(/[a-z0-9]+/g) || [])
+      .filter((token) => !ignoredSimilarityTokens.has(token))
+  );
+};
+
+const sortSimilarItems = (items) => {
+  const entries = items.map((item, originalIndex) => ({
+    item,
+    originalIndex,
+    tokens: getItemTokens(item.name),
+    isDrink: String(item.name).trim().startsWith("~") || drinkPattern.test(
+      String(item.name).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    ),
+  }));
+
+  const sortGroup = (group) => {
+    const remaining = [...group];
+    const sorted = [];
+    if (remaining.length === 0) return sorted;
+    sorted.push(remaining.shift());
+
+    while (remaining.length > 0) {
+      const previousTokens = sorted[sorted.length - 1].tokens;
+      let bestIndex = 0;
+      let bestScore = -1;
+
+      remaining.forEach((candidate, index) => {
+        const intersectionSize = [...candidate.tokens].filter((token) => previousTokens.has(token)).length;
+        const unionSize = new Set([...candidate.tokens, ...previousTokens]).size;
+        const score = unionSize === 0 ? 0 : intersectionSize / unionSize;
+        if (score > bestScore || (score === bestScore && candidate.originalIndex < remaining[bestIndex].originalIndex)) {
+          bestIndex = index;
+          bestScore = score;
+        }
+      });
+
+      sorted.push(remaining.splice(bestIndex, 1)[0]);
+    }
+
+    return sorted;
+  };
+
+  return [
+    ...sortGroup(entries.filter((entry) => entry.isDrink)),
+    ...sortGroup(entries.filter((entry) => !entry.isDrink)),
+  ];
+};
+
+const postJsonWithRetry = async (url, payload, maxAttempts = 3) => {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(7000),
+      });
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(errorBody.error || `Server error: ${response.status}`);
+      }
+      return response.json();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+};
+
+const readBills = () => {
+  try {
+    return JSON.parse(localStorage.getItem("bills") || "[]");
+  } catch {
+    return [];
+  }
+};
+
+const syncPendingBills = async () => {
+  const pendingBills = readBills().filter((bill) => bill.syncStatus === "pending");
+  for (const bill of pendingBills) {
+    try {
+      const savedBill = await postJsonWithRetry(`${API_BASE_URL}/api/bills`, bill);
+      const currentBills = readBills();
+      localStorage.setItem("bills", JSON.stringify(currentBills.map((current) =>
+        current.clientId === bill.clientId ? { ...savedBill, syncStatus: "synced" } : current
+      )));
+    } catch (error) {
+      console.warn("Bill sync is pending:", error.message);
+    }
+  }
+};
 
 const Modal = ({
   isOpen,
@@ -20,11 +123,24 @@ const Modal = ({
   const [showPaymentSelection, setShowPaymentSelection] = useState(false);
   const [editingNoteIndex, setEditingNoteIndex] = useState(null);
   const [itemNote, setItemNote] = useState("");
-  const [paymentButtonRef, setPaymentButtonRef] = useState(null);
   const [showCustomDishModal, setShowCustomDishModal] = useState(false);
+  const [sortSimilar, setSortSimilar] = useState(false);
   const [customPrice, setCustomPrice] = useState("");
+  const [isSavingBill, setIsSavingBill] = useState(false);
+  const savingBillRef = useRef(false);
+  const lastItemTapRef = useRef({ index: -1, time: 0 });
   const modalRef = useRef(null); // Reference for the modal
   const searchWrapperRef = useRef(null); // Reference for the search wrapper
+
+  useEffect(() => {
+    syncPendingBills();
+    const interval = window.setInterval(syncPendingBills, 15000);
+    window.addEventListener("online", syncPendingBills);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("online", syncPendingBills);
+    };
+  }, []);
   // Calculate the total
 
 
@@ -63,6 +179,9 @@ const Modal = ({
   const filteredDishes = dishes.filter((dish) =>
     dish.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  const displayedOrderItems = sortSimilar
+    ? sortSimilarItems(orderItems)
+    : orderItems.map((item, originalIndex) => ({ item, originalIndex }));
 
   // Handle search input changes
   const handleSearchChange = (e) => {
@@ -74,6 +193,17 @@ const Modal = ({
   const openItemNoteEditor = (index) => {
     setEditingNoteIndex(index);
     setItemNote(orderItems[index]?.note || "");
+  };
+
+  const handleItemTap = (index) => {
+    const now = Date.now();
+    const lastTap = lastItemTapRef.current;
+    if (lastTap.index === index && now - lastTap.time <= 500) {
+      lastItemTapRef.current = { index: -1, time: 0 };
+      openItemNoteEditor(index);
+      return;
+    }
+    lastItemTapRef.current = { index, time: now };
   };
 
   const closeItemNoteEditor = () => {
@@ -92,6 +222,7 @@ const Modal = ({
   };
 
   const createBillAndRemoveChecked = async (tableName, method) => {
+    if (savingBillRef.current) return;
     // Step 1: Gather checked items
     const checkedList = orderItems
       .filter((_, index) => checkedItems[index])
@@ -102,11 +233,15 @@ const Modal = ({
 
     if (checkedList.length === 0) return; // Nothing selected
 
+    savingBillRef.current = true;
+    setIsSavingBill(true);
+
     // Step 2: Calculate total price
     const billTotal = checkedList.reduce((sum, item) => sum + item.price, 0);
 
     // Step 3: Create bill object
     const newBill = {
+      clientId: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       table: tableName,
       items: checkedList,
       total: billTotal,
@@ -114,55 +249,18 @@ const Modal = ({
       date: new Date().toISOString(),
     };
 
-    // Helper: fetch with timeout
-    const fetchWithTimeout = (url, options, timeout = 7000) =>
-      Promise.race([
-        fetch(url, options),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Timeout")), timeout)
-        ),
-      ]);
+    const existingBills = readBills();
+    localStorage.setItem("bills", JSON.stringify([...existingBills, { ...newBill, syncStatus: "pending" }]));
 
-    const postJsonWithRetry = async (url, payload, maxAttempts = 3) => {
-      let lastError;
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-          const response = await fetchWithTimeout(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-
-          if (!response.ok) {
-            const errorBody = await response.json().catch(() => ({}));
-            throw new Error(errorBody.error || `Server error: ${response.status}`);
-          }
-
-          return response.json();
-        } catch (error) {
-          lastError = error;
-          console.warn(`⚠️ Attempt ${attempt} to POST ${url} failed:`, error.message);
-          if (attempt === maxAttempts) break;
-        }
-      }
-      throw lastError;
-    };
-
-    let savedBill;
     try {
-      savedBill = await postJsonWithRetry(`${API_BASE_URL}/api/bills`, newBill);
-      console.log("Bill synced to server successfully", savedBill);
+      const savedBill = await postJsonWithRetry(`${API_BASE_URL}/api/bills`, newBill);
+      const currentBills = readBills();
+      localStorage.setItem("bills", JSON.stringify(currentBills.map((bill) =>
+        bill.clientId === newBill.clientId ? { ...savedBill, syncStatus: "synced" } : bill
+      )));
     } catch (err) {
       console.error("Failed to save bill to server:", err);
-      alert('Không thể lưu bill vào database. Vui lòng refresh lại trang.');
-      window.location.reload();
-      return;
     }
-
-    // Save bill locally only after successful DB persistence
-    const existingBills = JSON.parse(localStorage.getItem("bills")) || [];
-    existingBills.push(savedBill);
-    localStorage.setItem("bills", JSON.stringify(existingBills));
 
     // Step 4: Remove checked items from orderItems
     const updatedOrderItems = orderItems.filter((_, index) => !checkedItems[index]);
@@ -175,301 +273,312 @@ const Modal = ({
     };
     localStorage.setItem("orders", JSON.stringify(updatedAllOrders));
 
-    const payload = {
-      table: tableName,
-      orders: updatedOrderItems,
-    };
-
     try {
-      await postJsonWithRetry(`${API_BASE_URL}/api/orders`, payload);
-      console.log(`✅ Synced table ${tableName} orders to DB`);
+      const synced = await setOrderItems(updatedOrderItems);
+      if (!synced) {
+        console.warn("Bill saved; table update will sync when a connection is available.");
+      }
     } catch (err) {
       console.error("Failed to sync updated orders to server:", err);
-      alert('Bill đã lưu, nhưng cập nhật đơn hàng thất bại. Vui lòng refresh lại trang.');
-      window.location.reload();
-      return;
     }
 
     // Step 5: Clear checked state and close payment UI
     setCheckedItems({});
     setShowPaymentSelection(false);
+    savingBillRef.current = false;
+    setIsSavingBill(false);
   };
 
-  const selectAllAndPay = (e) => {
+  const selectAllAndPay = () => {
     const allChecked = {};
     orderItems.forEach((_, i) => {
       allChecked[i] = true;
     });
     setCheckedItems(allChecked);
-    if (e && e.currentTarget) {
-      setPaymentButtonRef(e.currentTarget);
-    }
     setShowPaymentSelection(true);
   };
 
   return (
     isOpen && (
-      <div className="text-xl fixed inset-0 bg-gray-400 bg-opacity-50 flex justify-center items-center z-50">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-sm sm:p-5">
         <div
           ref={modalRef}
-          className="bg-white p-6 rounded-lg w-full h-full sm:max-w-md sm:max-h-screen overflow-y-auto relative select-none"
+          className="relative flex h-full w-full max-w-xl flex-col overflow-hidden bg-white text-slate-900 shadow-2xl sm:max-h-[92vh] sm:rounded-2xl"
         >
-          {/* Close button (X) */}
-          <button
-            onClick={() => {
-              setShowPaymentSelection(false);
-              onClose();
-            }}
-            className="absolute mt-12 top-2 right-2 text-2xl font-bold text-white bg-black hover:text-gray-700"
-          >
-            X
-          </button>
-
-          <h2 className="text-3xl font-bold mb-4 mt-10">Tisch {tableName}</h2>
-
-          {/* Custom Item Button + Search Bar */}
-          <div className="mb-4 flex gap-2 items-center" ref={searchWrapperRef}>
+          {isSavingBill && (
+            <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-3 bg-slate-950/60 text-white" role="status" aria-live="polite">
+              <span className="h-11 w-11 animate-spin rounded-full border-4 border-white/30 border-t-white" />
+              <span className="text-base font-medium">Zahlung wird gespeichert...</span>
+            </div>
+          )}
+          <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Bestellung</p>
+              <h2 className="mt-1 text-xl font-semibold">Tisch {tableName}</h2>
+            </div>
             <button
-              onClick={() => setShowCustomDishModal(true)}
-              className="text-black bg-gray-200 hover:bg-gray-300 w-10 h-10 rounded shadow flex items-center justify-center text-3xl font-bold transition-colors leading-none pb-1 shrink-0"
-              title="Custom Diverse Speisen"
+              type="button"
+              onClick={() => {
+                setShowPaymentSelection(false);
+                onClose();
+              }}
+              className="rounded-md p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+              aria-label="Tisch schließen"
             >
-              +
+              <FiX size={20} />
             </button>
-            <div className="relative flex-1">
-              <input
-                type="text"
-                placeholder="Search for a dish..."
-                value={searchQuery}
-                onChange={handleSearchChange}
-                className="w-full p-2 border border-gray-300 rounded select-text"
-              />
+          </header>
 
-              {/* Display filtered dishes only if showDishes is true */}
-              {showDishes && searchQuery && filteredDishes.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto bg-white border border-gray-300 rounded z-20 shadow-lg">
-                  {filteredDishes.slice(0, 8).map((dish, index) => (
-                    <div
-                      key={index}
-                      className="flex justify-between items-center p-2 cursor-pointer hover:bg-gray-200"
-                      onClick={() => {
-                        addOrderItem(dish.name, dish.price); // Add the item to the order
-                        setShowDishes(false); // Close the dropdown
-                        setSearchQuery(""); // Clear the search query
-                      }}
-                    >
-                      <span>{dish.name}</span>
-                      <span>{dish.price}€</span>
-                    </div>
+          <main className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+            <div className="mb-4 flex gap-2" ref={searchWrapperRef}>
+              <button
+                type="button"
+                onClick={() => setShowCustomDishModal(true)}
+                className="flex shrink-0 items-center justify-center border border-slate-300 bg-white text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+                style={{ width: "44px", height: "44px", padding: 0, borderRadius: "8px" }}
+                title="Eigene Speise hinzufügen"
+                aria-label="Eigene Speise hinzufügen"
+              >
+                <FiPlus size={23} strokeWidth={2.5} />
+              </button>
+              <div className="relative min-w-0 flex-1">
+                <FiSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+                <input
+                  type="text"
+                  placeholder="Speise suchen"
+                  value={searchQuery}
+                  onChange={handleSearchChange}
+                  className="w-full rounded-md border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                />
+                {showDishes && searchQuery && filteredDishes.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-xl">
+                    {filteredDishes.slice(0, 8).map((dish, index) => (
+                      <button
+                        key={`${dish.name}-${index}`}
+                        type="button"
+                        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50"
+                        onClick={() => {
+                          addOrderItem(dish.name, dish.price);
+                          setShowDishes(false);
+                          setSearchQuery("");
+                        }}
+                      >
+                        <span className="truncate">{dish.name}</span>
+                        <span className="shrink-0 tabular-nums text-slate-500">{dish.price}€</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {showDishes && searchQuery && filteredDishes.length === 0 && (
+                  <p className="absolute left-0 right-0 top-full z-20 mt-1 rounded-md border border-slate-200 bg-white px-3 py-3 text-center text-sm text-slate-500 shadow-lg">
+                    Keine Treffer
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-800">Artikel</h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">{orderItems.length}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSortSimilar((current) => !current)}
+                    className={`rounded-md border p-2 transition-colors ${sortSimilar ? "border-slate-400 bg-slate-100 text-slate-900" : "border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
+                    title={sortSimilar ? "Ursprüngliche Reihenfolge anzeigen" : "Ähnliche Artikel gruppieren"}
+                    aria-label={sortSimilar ? "Ursprüngliche Reihenfolge anzeigen" : "Ähnliche Artikel gruppieren"}
+                    aria-pressed={sortSimilar}
+                  >
+                    {sortSimilar ? <FiEyeOff size={17} /> : <FiEye size={17} />}
+                  </button>
+                </div>
+              </div>
+              {orderItems.length === 0 ? (
+                <div className="rounded-md border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500">
+                  Noch keine Artikel
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100 border-y border-slate-200">
+                  {displayedOrderItems.map(({ item, originalIndex }) => (
+                    <React.Fragment key={`${item.name}-${originalIndex}`}>
+                      <div
+                        onClick={() => handleItemTap(originalIndex)}
+                        className="flex items-center gap-3 py-1"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!!checkedItems[originalIndex]}
+                          onChange={() => toggleChecked(originalIndex)}
+                          onClick={(event) => event.stopPropagation()}
+                          className="h-4 w-4 shrink-0 accent-emerald-700"
+                          aria-label={`${item.name} für Zahlung auswählen`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <span className="block break-words text-sm font-medium text-slate-800">{item.name}</span>
+                          {item.note && <p className="mt-0.5 whitespace-pre-wrap text-xs text-slate-500">{item.note}</p>}
+                        </div>
+                        <span className="shrink-0 text-sm font-medium tabular-nums">{Number(item.price).toFixed(2)}€</span>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setCheckedItems((prev) => {
+                              const updated = { ...prev };
+                              delete updated[originalIndex];
+                              return updated;
+                            });
+                            removeOrderItem(originalIndex);
+                          }}
+                          className="rounded-md p-2 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-700"
+                          aria-label={`${item.name} entfernen`}
+                        >
+                          <FiTrash2 size={16} />
+                        </button>
+                      </div>
+                      {editingNoteIndex === originalIndex && (
+                        <div className="pb-3">
+                          <textarea
+                            value={itemNote}
+                            onChange={(e) => setItemNote(e.target.value)}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            rows={2}
+                            autoFocus
+                            className="w-full resize-y rounded-md border border-slate-200 p-2 text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                            placeholder="Notiz zum Artikel"
+                          />
+                          <div className="mt-2 flex justify-end gap-2">
+                            <button type="button" onClick={closeItemNoteEditor} className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Abbrechen</button>
+                            <button type="button" onClick={saveItemNote} className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">Speichern</button>
+                          </div>
+                        </div>
+                      )}
+                    </React.Fragment>
                   ))}
                 </div>
               )}
+            </section>
 
-              {/* If no dishes match the search query, display a "No results" message */}
-              {showDishes && searchQuery && filteredDishes.length === 0 && (
-                <div className="absolute left-0 right-0 top-full mt-1 p-2 text-center text-gray-500 bg-white border border-gray-300 rounded z-20 shadow-lg">
-                  No results found
-                </div>
-              )}
-            </div>
-          </div>
+          </main>
 
-          {/* Order Items */}
-          <div className="mt-2 p-1 border border-gray-300 rounded-lg shadow-lg bg-white">
-            {orderItems.map((item, index) => (
-              <React.Fragment key={index}>
-                <div
-                  onDoubleClick={() => openItemNoteEditor(index)}
-                  className="flex justify-between items-center px-2 py-1 border-b last:border-0 hover:bg-gray-100"
-                >
-                {/* Left: Checkbox + Item name */}
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={!!checkedItems[index]}
-                    onChange={() => toggleChecked(index)}
-                    className="w-4 h-4"
-                  />
-                  <div>
-                    <span className="font-semibold text-xl">{item.name}</span>
-                    {item.note && (
-                      <p className="text-sm text-gray-600 whitespace-pre-wrap">{item.note}</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Right: Price + Remove button */}
-                <div className="flex items-center space-x-0">
-                  <span className="text-xl text-black mr-1 ">{item.price}€</span>
-                  <span
-                    onClick={() => {
-                      // Remove the checkbox state too
-                      setCheckedItems(prev => {
-                        const updated = { ...prev };
-                        delete updated[index];   // delete this checkbox value
-                        return updated;
-                      });
-
-                      removeOrderItem(index);
-                    }}
-                    onDoubleClick={(e) => e.stopPropagation()}
-                    className="text-gray-700 text-xl p-0 leading-none cursor-pointer"
-                    style={{ background: 'none', border: 'none' }}
+          <footer className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 sm:px-5">
+            {Object.values(checkedItems).some(Boolean) && (
+              <div className="mb-3 flex items-center justify-between rounded-md bg-emerald-50 px-3 py-2.5">
+                <span className="text-sm text-emerald-900">Ausgewählt</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-semibold tabular-nums text-emerald-900">{totalPrice.toFixed(2)}€</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowPaymentSelection(true)}
+                    className="rounded-md bg-emerald-700 p-2 text-white transition-colors hover:bg-emerald-800"
+                    aria-label="Ausgewählte Artikel bezahlen"
                   >
-                    ✕
-                  </span>
+                    <FiDollarSign size={17} />
+                  </button>
                 </div>
-                </div>
-                {editingNoteIndex === index && (
-                  <div className="px-2 py-2 bg-blue-50 border-b last:border-0">
-                  <textarea
-                    value={itemNote}
-                    onChange={(e) => setItemNote(e.target.value)}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    rows={2}
-                    autoFocus
-                    className="w-full p-2 border border-blue-300 rounded-md resize-y select-text focus:outline-none focus:border-blue-500"
-                    placeholder="Ghi chú cho món ăn..."
-                  />
-                  <div className="flex justify-end gap-2 mt-2">
-                    <button
-                      type="button"
-                      onClick={closeItemNoteEditor}
-                      className="px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300"
-                    >
-                      Hủy
-                    </button>
-                    <button
-                      type="button"
-                      onClick={saveItemNote}
-                      className="px-3 py-1 text-sm text-white bg-blue-600 rounded hover:bg-blue-700"
-                    >
-                      Lưu ghi chú
-                    </button>
-                  </div>
-                  </div>
-                )}
-              </React.Fragment>
-            ))}
-
-
-
-          </div>
-          {/* Total price of checked items */}
-          <div className="flex justify-end items-center mt-3 gap-4">
-            {totalPrice > 0 && (
-              <div className="font-bold text-2xl text-green-700">
-                Getrennt: {totalPrice.toFixed(2)}€
               </div>
             )}
-            {Object.values(checkedItems).some(value => value) && (
-              <button
-                ref={setPaymentButtonRef}
-                onClick={(e) => {
-                  setPaymentButtonRef(e.currentTarget);
-                  setShowPaymentSelection(true);
-                }}
-                className="bg-green-600 hover:bg-green-800 text-white p-2 rounded-md shadow flex items-center justify-center transition-colors"
-                title="Bezahlen"
-              >
-                <FiDollarSign size={15} />
-              </button>
-            )}
-
-
-          </div>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs text-slate-500">Gesamt</p>
+                <p className="text-xl font-semibold tabular-nums text-slate-900">{calculateTotal()}€</p>
+              </div>
+              {orderItems.length > 0 && (
+                <button
+                  type="button"
+                  onClick={selectAllAndPay}
+                  className="flex items-center gap-2 rounded-md bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-800"
+                >
+                  <FiDollarSign size={17} />
+                  Alles bezahlen
+                </button>
+              )}
+            </div>
+          </footer>
 
           {showCustomDishModal && (
-            <div className="absolute inset-0 bg-white/95 flex flex-col justify-center items-center z-50 rounded-lg p-6">
-              <h3 className="text-3xl font-bold mb-4 text-gray-800">Diverse Speisen</h3>
-              <p className="text-lg text-gray-600 mb-6">Preis manuell eingeben:</p>
-
-              <input
-                type="number"
-                placeholder="Preis (€)"
-                value={customPrice}
-                onChange={(e) => setCustomPrice(e.target.value)}
-                className="w-full max-w-sm p-4 border border-gray-300 rounded-lg text-2xl text-center mb-6 focus:outline-none focus:border-blue-500 select-text"
-                step="0.01"
-                autoFocus
-              />
-
-              <div className="flex gap-4">
-                <button
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-3 rounded-lg text-xl shadow-lg transition-transform hover:scale-105"
-                  onClick={() => {
-                    if (customPrice && !isNaN(customPrice) && Number(customPrice) > 0) {
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+              <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-base font-semibold">Eigene Speise</h3>
+                  <button type="button" onClick={() => setShowCustomDishModal(false)} className="rounded-md p-2 text-slate-500 hover:bg-slate-100" aria-label="Schließen">
+                    <FiX size={18} />
+                  </button>
+                </div>
+                <label className="mb-4 block text-sm text-slate-600">
+                  Preis
+                  <div className="relative mt-1.5">
+                    <input
+                      type="number"
+                      placeholder="0,00"
+                      value={customPrice}
+                      onChange={(e) => setCustomPrice(e.target.value)}
+                      className="w-full rounded-md border border-slate-200 py-2.5 pl-3 pr-9 text-base outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                      step="0.01"
+                      autoFocus
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">€</span>
+                  </div>
+                </label>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomPrice("");
+                      setShowCustomDishModal(false);
+                    }}
+                    className="rounded-md px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
+                  >
+                    Abbrechen
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!customPrice || Number(customPrice) <= 0}
+                    onClick={() => {
                       addOrderItem("Diverse Speisen", parseFloat(customPrice));
                       setCustomPrice("");
                       setShowCustomDishModal(false);
-                    }
-                  }}
-                >
-                  + Einfügen
-                </button>
-                <button
-                  className="bg-gray-400 hover:bg-gray-500 text-white font-bold px-8 py-3 rounded-lg text-xl shadow transition-colors"
-                  onClick={() => {
-                    setCustomPrice("");
-                    setShowCustomDishModal(false);
-                  }}
-                >
-                  Abbrechen
-                </button>
+                    }}
+                    className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Hinzufügen
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
-          {showPaymentSelection && paymentButtonRef && (
-            <div 
-              className="fixed bg-white border-2 border-gray-300 rounded-lg shadow-xl p-4 z-50 w-72"
-              style={{
-                top: `${paymentButtonRef.getBoundingClientRect().top - 50}px`,
-                right: `${window.innerWidth - paymentButtonRef.getBoundingClientRect().right + 10}px`,
-              }}
-            >
-              <button
-                onClick={() => setShowPaymentSelection(false)}
-                className="absolute top-2 right-2 text-xl font-bold text-gray-600 hover:text-gray-800"
-              >
-                X
-              </button>
-              <div className="text-center font-bold text-lg mb-4">
-                Total: {totalPrice.toFixed(2)}€
-              </div>
-              <div className="flex flex-row gap-3 justify-center">
-                <button
-                  className="bg-green-500 hover:bg-green-600 text-white font-bold px-4 py-3 rounded-lg text-lg shadow-lg transition-transform hover:scale-105"
-                  onClick={() => createBillAndRemoveChecked(tableName, "Bar")}
-                >
-                  💵 Bar
-                </button>
-                <button
-                  className="bg-blue-500 hover:bg-blue-600 text-white font-bold px-4 py-3 rounded-lg text-lg shadow-lg transition-transform hover:scale-105"
-                  onClick={() => createBillAndRemoveChecked(tableName, "Karte")}
-                >
-                  💳 Karte
-                </button>
+          {showPaymentSelection && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4">
+              <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-base font-semibold">Zahlungsart</h3>
+                  <button type="button" onClick={() => setShowPaymentSelection(false)} className="rounded-md p-2 text-slate-500 hover:bg-slate-100" aria-label="Schließen">
+                    <FiX size={18} />
+                  </button>
+                </div>
+                <p className="mb-4 text-sm text-slate-500">Betrag <span className="float-right font-semibold tabular-nums text-slate-900">{totalPrice.toFixed(2)}€</span></p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={isSavingBill}
+                    className="rounded-md bg-emerald-700 px-3 py-3 text-sm font-semibold text-white transition-colors hover:bg-emerald-800 disabled:opacity-50"
+                    onClick={() => createBillAndRemoveChecked(tableName, "Bar")}
+                  >
+                    Bar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSavingBill}
+                    className="rounded-md bg-slate-900 px-3 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
+                    onClick={() => createBillAndRemoveChecked(tableName, "Karte")}
+                  >
+                    Karte
+                  </button>
+                </div>
               </div>
             </div>
           )}
-
-          {/* Total */}
-          <div className="mt-4 font-bold bg-blue-300 w-full rounded-lg p-3 flex justify-between items-center">
-            <div>
-              Insgesamt:<span className="text-2xl ml-4 relative top-0.5">{calculateTotal()}€</span>
-            </div>
-            {orderItems && orderItems.length > 0 && (
-              <button
-                onClick={selectAllAndPay}
-                className="bg-blue-600 hover:bg-blue-800 text-white px-4 py-2 rounded-lg shadow font-semibold flex items-center gap-2 transition-colors text-lg"
-              >
-                <FiDollarSign size={15} />
-              </button>
-            )}
-          </div>
-
-
         </div>
       </div>
     )

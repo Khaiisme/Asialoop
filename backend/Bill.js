@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const billSchema = new mongoose.Schema({
+  clientId: { type: String, unique: true, sparse: true },
   table: String,
   items: [
     {
@@ -10,7 +11,7 @@ const billSchema = new mongoose.Schema({
   ],
   total: Number,
   method: String,
-  date: { type: Date, default: Date.now }
+  date: { type: Date, default: Date.now, index: true }
 });
 
 module.exports = mongoose.model('Bill', billSchema);

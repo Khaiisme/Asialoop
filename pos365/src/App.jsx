@@ -361,6 +361,7 @@ const dishes = [
   { name: "~Flasche Sauvignon", price: 20 },
   { name: "~Flasche Grauburgrunder", price: 23.5 },
   { name: "~Flasche Merlot", price: 20 },
+  { name: "~Flasche Primitivo", price: 20 },
   { name: "~Merlot", price: 6.5 },
   { name: "~Primitivo", price: 6.5 },
   { name: "~Jasmin Tee", price: 3.9 },
@@ -485,8 +486,13 @@ const App = () => {
         ordersObject[table] = orders;
       });
 
-      localStorage.setItem("orders", JSON.stringify(ordersObject));
-      setAllOrders(ordersObject);
+      const pendingOrders = JSON.parse(localStorage.getItem("pendingOrders") || "{}");
+      const mergedOrders = { ...ordersObject };
+      Object.entries(pendingOrders).forEach(([table, payload]) => {
+        mergedOrders[table] = payload.orders;
+      });
+      localStorage.setItem("orders", JSON.stringify(mergedOrders));
+      setAllOrders(mergedOrders);
     } catch (err) {
       console.error("Order fetch error:", err);
     }
@@ -531,8 +537,43 @@ const App = () => {
   useEffect(() => {
     const interval = setInterval(() => {
       fetchOrders();
-    }, 800);
+    }, 5000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const syncPendingOrders = async () => {
+      let pendingOrders = {};
+      try {
+        pendingOrders = JSON.parse(localStorage.getItem("pendingOrders") || "{}");
+      } catch {
+        return;
+      }
+      for (const [table, payload] of Object.entries(pendingOrders)) {
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/orders`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) continue;
+          const latest = JSON.parse(localStorage.getItem("pendingOrders") || "{}");
+          if (JSON.stringify(latest[table]?.orders) === JSON.stringify(payload.orders)) {
+            delete latest[table];
+            localStorage.setItem("pendingOrders", JSON.stringify(latest));
+          }
+        } catch (err) {
+          console.warn("Pending table sync failed:", err);
+        }
+      }
+    };
+    syncPendingOrders();
+    const interval = setInterval(syncPendingOrders, 15000);
+    window.addEventListener("online", syncPendingOrders);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("online", syncPendingOrders);
+    };
   }, []);
 
 
@@ -565,7 +606,7 @@ const App = () => {
   };
 
   const syncTableOrdersToServer = async (tableName, orders) => {
-    if (!tableName) return;
+    if (!tableName) return false;
 
     const payload = {
       table: tableName,
@@ -599,15 +640,14 @@ const App = () => {
         const data = await res.json();
         console.log("✅ Synced table", tableName, "to DB:", data);
         success = true;
+        return true;
       } catch (err) {
         console.warn(`Attempt ${attempts} failed:`, err.message);
         if (attempts < maxAttempts) {
           await new Promise((r) => setTimeout(r, 500));
         } else {
           console.error("❌ Failed after 3 attempts:", err);
-          alert(
-            `⚠️ Could not sync table ${tableName} with the server. Will retry later.`
-          );
+          return false;
         }
       }
     }
@@ -823,11 +863,22 @@ const App = () => {
         onClose={() => setIsModalOpen(false)}
         tableName={currentTable}
         orderItems={allOrders[currentTable] || []}
-        setOrderItems={(newItems) => {
+        setOrderItems={async (newItems) => {
           const updated = { ...allOrders, [currentTable]: newItems };
           setAllOrders(updated);
           localStorage.setItem("orders", JSON.stringify(updated));
-          syncTableOrdersToServer(currentTable, newItems);
+          const pendingOrders = JSON.parse(localStorage.getItem("pendingOrders") || "{}");
+          const payload = { table: currentTable, orders: newItems };
+          localStorage.setItem("pendingOrders", JSON.stringify({ ...pendingOrders, [currentTable]: payload }));
+          const synced = await syncTableOrdersToServer(currentTable, newItems);
+          if (synced) {
+            const latest = JSON.parse(localStorage.getItem("pendingOrders") || "{}");
+            if (JSON.stringify(latest[currentTable]?.orders) === JSON.stringify(newItems)) {
+              delete latest[currentTable];
+              localStorage.setItem("pendingOrders", JSON.stringify(latest));
+            }
+          }
+          return synced;
         }}
         addOrderItem={addOrderItem}
         removeOrderItem={removeOrderItem}
@@ -860,34 +911,21 @@ const App = () => {
 
       {showBills && (
         <div className="fixed inset-0 bg-gray-300 flex justify-center items-center p-4">
-
-          {/* Modal */}
-          <div className="bg-white p-4 rounded-lg shadow-xl max-h-[80vh]
-                  overflow-y-auto w-[90%] max-w-md">
+          <div className="bg-white p-4 rounded-lg shadow-xl max-h-[80vh] overflow-y-auto w-[90%] max-w-md">
             <BillsPage />
           </div>
-
-          {/* FIXED close button (MOBILE POSITION) */}
           <button
             onClick={() => setShowBills(false)}
-            className="fixed top-4 right-4 md:hidden
-               bg-white text-gray-700 text-3xl rounded-full shadow 
-               w-10 h-10 flex items-center justify-center z-50"
+            className="fixed top-4 right-4 md:hidden bg-white text-gray-700 text-3xl rounded-full shadow w-10 h-10 flex items-center justify-center z-50"
           >
             ✕
           </button>
-
-          {/* FIXED close button (DESKTOP BESIDE MODAL) */}
           <button
             onClick={() => setShowBills(false)}
-            className="hidden md:flex fixed top-10 
-               right-[calc(50%-280px)]   /* position beside modal */
-               bg-white text-gray-700 text-3xl rounded-full shadow 
-               w-12 h-12 items-center justify-center z-50"
+            className="hidden md:flex fixed top-10 right-[calc(50%-280px)] bg-white text-gray-700 text-3xl rounded-full shadow w-12 h-12 items-center justify-center z-50"
           >
             ✕
           </button>
-
         </div>
       )}
 
