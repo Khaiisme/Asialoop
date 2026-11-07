@@ -87,12 +87,12 @@ const dishes = [
   { name: "29d.Udon Kokos-Suppe Garnelen", price: 16.9 },
   { name: "30.Udon Tom-Yum-Suppe", price: 16.5 },
 
-  { name: "31a.Gebraten Udon-Nudeln Tofu", price: 13.9 },
-  { name: "31b.Gebraten Udon-Nudeln gegrillte Hähnchen", price: 16.9 },
-  { name: "31b.Gebraten Udon-Nudeln gebacken Hähnchen", price: 15.5 },
-  { name: "31c.Gebraten Udon-Nudeln Rind", price: 15.9 },
-  { name: "31d.Gebraten Udon-Nudeln Garnelen", price: 16.9 },
-  { name: "31e.Gebraten Udon-Nudeln Ente", price: 16.9 },
+  { name: "31a.Gebraten Udon Tofu", price: 13.9 },
+  { name: "31b.Gebraten Udon gegrillte Hähnchen", price: 16.9 },
+  { name: "31b.Gebraten Udon gebacken Hähnchen", price: 15.5 },
+  { name: "31c.Gebraten Udon Rind", price: 15.9 },
+  { name: "31d.Gebraten Udon Garnelen", price: 16.9 },
+  { name: "31e.Gebraten Udon Ente", price: 16.9 },
 
 
   { name: "32a.Ramen Tofu", price: 14.5 },
@@ -657,7 +657,7 @@ const App = () => {
   const addOrderItem = async (name, price) => {
     const newOrderItem = { name, price };
     const currentOrders = allOrders[currentTable] || [];
-    const updatedOrderItems = [...currentOrders, newOrderItem];
+    const updatedOrderItems = [newOrderItem, ...currentOrders];
 
     const updatedOrders = { ...allOrders, [currentTable]: updatedOrderItems };
     setAllOrders(updatedOrders);
